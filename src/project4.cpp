@@ -13,6 +13,7 @@
 #include <sensor_msgs/PointCloud.h>
 #include <laser_geometry/laser_geometry.h>
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
+#include <math.h>
 
 
 
@@ -28,23 +29,28 @@ class project4
 
 	project4(ros::NodeHandle nh)
 	{
-/**	
+		odomHeading = 0;//huge number fix
+		odomX = 0;
+		odomY = 0;
 		pub = nh.advertise<geometry_msgs::Twist>
 			("mobile_base/commands/velocity", 100);
-		ros::Subscriber odomSub = nh.subscribe("odom", 
-			10, &project4::odomCallback, this);
-		ros::Subscriber odomCom = nh.subscribe("robot_pose_ekf/odom_combined", 
+		odomSub = nh.subscribe("odom", 
+			10, &project4::odomCallBack, this);
+		odomCom = nh.subscribe("robot_pose_ekf/odom_combined", 
 			10, &project4::odomCombinedCallBack, this);
-*/
+
 
 		//stage testing
-		odomHeading = 0;
+
+
+		//TODO initialize all
+/**
 		pub = nh.advertise<geometry_msgs::Twist>("robot_0/cmd_vel", 100);
 		odomCom = nh.subscribe("robot_pose_ekf/odom_combined", 
 			10, &project4::odomCombinedCallBack, this);
 		odomSub = nh.subscribe("robot_0/odom", 
 			10, &project4::odomCallBack, this);
-		
+	*/	
 
 	}
 	
@@ -55,24 +61,50 @@ class project4
 
 		//Set the movement command rotation speed
 		msg.linear.x = 0.4;
+		msg.angular.z = 0.0;
 		// Current angle
-		double last_x = odomX;
-		double last_y = odomY;
+		double last_x;
+		double last_y;
+		int count = 0;
 		double thisD = 0;
-		ros::Rate rate(10.0);
-		while ((thisD < d) && ros::ok()) 
+		ros::Rate rate(50.0);
+		while (ros::ok()) 
 		{
+			if((odomX + odomY) != 0.0)
+			{
+				//ROS_INFO_STREAM(thisD);
+				//ROS_INFO_STREAM("split this d (above) and d (below");
+				//ROS_INFO_STREAM(d);
+				if(count == 0)
+				{
+					count++;
+					last_x = odomX;
+					last_y = odomY;
+				}
+				if(thisD >= d)
+				{
+					
+					msg.linear.x = 0.0;
+					
+					pub.publish(msg);
+					break;
+				}
+			//	ROS_INFO("odomx %f", odomX);
+				//ROS_INFO("odomY %f", odomY);
+				msg.angular.z = 0.0;
+				//Publish the Twist message and sleep for a cycle
+				pub.publish(msg);
+				//ROS_INFO_STREAM(msg);
 
-			//Publish the Twist message and sleep for a cycle
-		    pub.publish(msg);
-
-		    thisD = sqrt(pow((odomX - last_x), 2) + pow((odomY - last_y), 2));
+				thisD = sqrt(pow((odomX - last_x), 2) + pow((odomY - last_y), 2));
+			}	
+			//ROS_INFO_STREAM("SHOULD BE DOING THINGS");		
 			ros::spinOnce();
 			rate.sleep();
 		}
 
-		//Robot stops turning
-		msg.linear.x = 0;
+		//Robot stops moving
+		msg.linear.x = 0.0;
 		pub.publish(msg);
 	}
 
@@ -108,17 +140,44 @@ class project4
 
 		double initHead = odomHeading;
 		double desiredHead = initHead + angle;
+		double temp = 0;
+		double temp2 = 0;
+		double temp3 = 0;
+		if(desiredHead > M_PI || desiredHead < -M_PI)
+		{
+			desiredHead = remainder(desiredHead, 2.0*M_PI);
 
-		ROS_INFO("DESIRED HEAD %f" , desiredHead);
+/**
+			temp = 3.14159 - odomHeading;
+			temp2 = angle - temp;
+			temp3 = -3.14159 + temp2;
+			desiredHead = temp3;
+
+
+			desiredHead = desiredHead*(M_PI / 180);
+			desiredHead = fmod(desiredHead + 180, 360);
+			if(desiredHead < 0)
+			{
+				desiredHead += 360;
+			}
+			desiredHead = desiredHead * (180 / M_PI);
+*/
+		}
+
+		//ROS_INFO("DESIRED HEAD %f" , desiredHead);
 		msg.angular.z = 0.6;
 		pub.publish(msg);
 		ros::Rate rate(10);
-		ROS_INFO("init head %f" , initHead);
+		//ROS_INFO("init head %f" , initHead);
 		while(ros::ok())
 		{
+	
+			//ROS_INFO_STREAM("turning");
 			pub.publish(msg);
-			ROS_INFO("ODOM %f", odomHeading);
-			if(odomHeading < desiredHead + 0.149 && odomHeading > desiredHead - 0.149)
+			//ROS_INFO("ODOM %f", odomHeading);
+			//ROS_INFO("desired %f", desiredHead);
+			if(odomHeading > (desiredHead - 0.09) &&
+				 odomHeading < (desiredHead + 0.09))
 			{
 				msg.angular.z = 0.0;
 				pub.publish(msg);
@@ -163,14 +222,15 @@ class project4
 		//double desiredHead = initHead + angle;
 
 		ROS_INFO("DESIRED HEAD %f" , angle);
+
+		
 		msg.angular.z = 0.6;
 		pub.publish(msg);
 		ros::Rate rate(10);
 		while(ros::ok())
 		{
 			pub.publish(msg);
-			ROS_INFO("ODOM %f", odomHeading);
-			if(odomHeading < angle + 0.149 && odomHeading > angle - 0.149)
+			if(odomHeading < angle + 0.25 && odomHeading > angle - 0.25)
 			{
 				msg.angular.z = 0.0;
 				pub.publish(msg);
@@ -184,7 +244,13 @@ class project4
 
 	void odomCallBack(const nav_msgs::Odometry::ConstPtr& msg)
 	{
-		odomX = -msg->pose.pose.position.y;
+		//odomX = 0;
+		//odomY = 0;
+		//if(std::abs(-msg->pose.pose.position.y - odomX) < 0.5)
+	//	{
+			odomX = -msg->pose.pose.position.y;
+		//}
+		//if(std::abs(msg->pose.pose.position.x - odomY) < 0.5)
 		odomY = msg->pose.pose.position.x;
 		odomHeading = tf::getYaw(msg->pose.pose.orientation);
 			
@@ -196,6 +262,18 @@ class project4
 		comX = -msg->pose.pose.position.y;
 		comY = msg->pose.pose.position.x;
 		comHeading = tf::getYaw(msg->pose.pose.orientation);
+	}
+	
+	void pauseRobot()
+	{
+		ros::Time begin = ros::Time::now();
+		ros::Duration five_seconds(5, 0);
+		ros::Rate rate(10);
+		while(ros::Time::now() < begin + five_seconds)
+		{
+			ros::spinOnce();
+			rate.sleep();
+		}
 	}
 	
 
@@ -210,21 +288,47 @@ int main(int argc, char **argv)
 	ROS_INFO_STREAM("Enters Main");
 	ros::init(argc, argv, "project4");
 	ros::NodeHandle nh;
-	ROS_INFO_STREAM("Enters Main");
 	project4 *proj = new project4(nh);
-	ROS_INFO_STREAM("Enters Main");
-	proj->rotate_rel(M_PI/2);
+//	proj->rotate_rel(M_PI/2);
 
-	proj->rotate_abs(0);
+	//proj->rotate_abs(0);
+	geometry_msgs::Twist msg;
+	msg.linear.x = 0.0;
+	msg.angular.z = 0.0;
 
-	proj->translate(1);
-	proj->rotate_rel(M_PI/2);
-	proj->translate(1);
-	proj->rotate_rel(M_PI/2);
-	proj->translate(1);
-	proj->rotate_rel(M_PI/2);
-	proj->translate(1);
-	proj->rotate_rel(M_PI/2);
+	ROS_INFO_STREAM("translate 1");
+	proj->translate(1);////////////////////////
+proj->pauseRobot();
+	ROS_INFO_STREAM("TURN 1");
+	proj->rotate_rel(M_PI/2);/////////////////////
+proj->pauseRobot();
+	//proj->rotate_abs(M_PI/2);
+	ROS_INFO_STREAM("translate 2");
+	proj->translate(1);////////////////
+proj->pauseRobot();
+
+	ROS_INFO_STREAM("TURN 2");
+	proj->rotate_rel(M_PI/2);/////////////////////
+proj->pauseRobot();
+	//proj->rotate_abs(M_PI);
+
+	ROS_INFO_STREAM("translate 3");
+	proj->translate(1);//////////////////
+proj->pauseRobot();
+
+	ROS_INFO_STREAM("TURN 3");
+	proj->rotate_rel(M_PI/2);///////////////////////
+proj->pauseRobot();
+	//proj->rotate_abs(-M_PI);
+
+	ROS_INFO_STREAM("translate 4");
+	proj->translate(1);///////////////////
+proj->pauseRobot();
+	
+	ROS_INFO_STREAM("TURN 4");
+	proj->rotate_rel(M_PI/2);/////////////////
+	//proj->rotate_abs(0);
+
 	ros::spin();
 
  return 0;
